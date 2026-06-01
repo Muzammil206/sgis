@@ -44,10 +44,32 @@ app.set('trust proxy', 1);
 // Helmet — sets secure HTTP response headers
 app.use(helmet());
 
-// CORS — allow only the configured frontend origin
+// CORS — allow configured frontend origin(s)
+// Support multiple origins separated by comma (e.g., "http://localhost:5173,https://sgis.naviss.tech")
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim().replace(/\/$/, '')); // Remove trailing slash
+
 app.use(cors({
-  origin:      process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Normalize origin by removing trailing slash for comparison
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    
+    // Check if origin is allowed
+    if (allowedOrigins.includes(normalizedOrigin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked request from origin: ${origin} (normalized: ${normalizedOrigin})`);
+      console.warn(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
+      callback(new Error('CORS policy: origin not allowed'));
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
 }));
 
 // Global rate limiter — 300 requests per 15 minutes per IP
