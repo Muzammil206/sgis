@@ -7,6 +7,12 @@
 -- =============================================================================
 
 -- =============================================================================
+-- PART 0: Ensure PostGIS is enabled
+-- =============================================================================
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- =============================================================================
 -- PART 1: Coordinate system type enum
 -- =============================================================================
 
@@ -150,7 +156,7 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- Change DB2 geom to also store in WGS84 (4326) for consistency
   NEW.geom := fn_coords_to_wgs84(
-    NEW.coordinate_system_type,
+    COALESCE(NEW.coordinate_system_type, 'utm_minna_zone31'::coordinate_system_enum),
     NEW.utm_easting,
     NEW.utm_northing,
     NEW.wgs84_lng,
@@ -283,14 +289,14 @@ SET
   )
 WHERE utm_easting IS NOT NULL
   AND utm_northing IS NOT NULL
-  AND geom IS NULL
-  AND coordinate_system_type IS NULL;
+  AND (geom IS NULL OR geom::text = 'SRID=26331;POINT EMPTY'::text)
+  AND (coordinate_system_type IS NULL);
 
 DO $$
 DECLARE v_count INT;
 BEGIN
-  SELECT COUNT(*) INTO v_count FROM surveyor_lodgments WHERE geom IS NOT NULL;
-  RAISE NOTICE 'GIS backfill complete — % DB2 records now have geometry', v_count;
+  SELECT COUNT(*) INTO v_count FROM surveyor_lodgments WHERE geom IS NOT NULL AND ST_IsEmpty(geom) = FALSE;
+  RAISE NOTICE 'GIS backfill complete — % DB2 records now have valid geometry', v_count;
 END;
 $$;
 

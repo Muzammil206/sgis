@@ -1,0 +1,121 @@
+# ============================================================================
+# SGIS — docker-compose.yml
+# Orchestrates the SGIS backend with PostgreSQL database
+# Usage:
+#   docker-compose up              — Start all services
+#   docker-compose down            — Stop all services
+#   docker-compose logs -f         — View logs
+#   docker-compose exec api bun src/index.js  — Run commands in container
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # PostgreSQL Database (local development setup)
+  # Use this for local development. For production, use Neon or AWS RDS.
+  # ==========================================================================
+  db:
+    image: postgres:16-alpine
+    container_name: sgis-postgres
+    environment:
+      POSTGRES_DB: sgis
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=postgis"
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persist database data across container restarts
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-run SQL migrations on startup
+      - ./db:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d sgis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sgis-network
+
+  # ==========================================================================
+  # PostGIS (Geographic extension for PostgreSQL)
+  # Automatically installed via Dockerfile in db service
+  # Provides: ST_Transform, ST_Distance, ST_MakePoint, etc.
+  # ==========================================================================
+  # PostGIS is included in the official postgres:16-alpine image as an extension
+
+  # ==========================================================================
+  # SGIS Backend API
+  # Node.js/Express server running on port 4000
+  # ==========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sgis-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Database connection (use docker network DNS)
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: sgis
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      
+      # OR use remote Neon database (comment out DB_* above if using)
+      # DATABASE_URL: ${DATABASE_URL}
+      
+      # API configuration
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-development}
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_a_long_random_secret_min_32_chars}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:5173}
+    ports:
+      - "4000:4000"
+    volumes:
+      # Mount source code for development (hot reload with bun --watch)
+      - ./src:/app/src
+      - ./uploads:/app/uploads
+    working_dir: /app
+    command: bun --watch src/index.js  # Use bun watch for hot reload in dev
+    networks:
+      - sgis-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ==========================================================================
+  # (Optional) pgAdmin — PostgreSQL web UI for database management
+  # Access at: http://localhost:5050
+  # Username: admin@admin.com
+  # Password: admin
+  # ==========================================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: sgis-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - sgis-network
+    # Uncomment the line below to disable this service
+    # profiles: ["dev-tools"]
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  sgis-network:
+    driver: bridge

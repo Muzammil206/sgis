@@ -7,6 +7,12 @@
 -- =============================================================================
 
 -- =============================================================================
+-- PART 0: Enable PostGIS extension
+-- =============================================================================
+
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- =============================================================================
 -- PART 1: Make UTM / coordinate fields optional in surveyor_lodgments (DB2)
 -- These were NOT NULL — some plans do not have UTM coordinates
 -- =============================================================================
@@ -88,6 +94,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_sl_geom ON surveyor_lodgments;
 CREATE TRIGGER trg_sl_geom
   BEFORE INSERT OR UPDATE OF utm_easting, utm_northing
   ON surveyor_lodgments
